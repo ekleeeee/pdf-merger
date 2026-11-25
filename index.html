@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="여러 PDF를 하나로 합쳐요. 파일은 내 브라우저 밖으로 나가지 않아요.">
+<title>PDF 합치기</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root {
+  --bg: #ffffff; --soft: #f2f4f6; --text: #191f28; --sub: #6b7684; --line: #e5e8eb;
+  --blue: #3182f6; --red: #f04452; --green: #03b26c;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  font-size: 1rem; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere;
+}
+h1, h2, p, ul { margin: 0; padding: 0; }
+h1 { font-size: 1.625rem; font-weight: 700; }
+h2 { font-size: 1.25rem; font-weight: 700; }
+ul { list-style: none; }
+svg { display: block; flex: none; }
+.small { font-size: .8125rem; color: var(--sub); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.page { max-width: 1072px; margin: 0 auto; padding: 32px 16px 48px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.head p { margin-top: 4px; color: var(--sub); }
+.main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; position: relative; }
+.card { border: 1px solid var(--line); border-radius: 16px; padding: 20px; min-width: 0; }
+
+button {
+  font: inherit; color: var(--text); background: var(--soft); border: 0; cursor: pointer;
+  min-height: 40px; padding: 8px 16px; border-radius: 8px; font-weight: 600; position: relative;
+  transition: transform .1s, background-color .1s;
+}
+/* 40px 버튼도 누르는 곳은 44px 이상 */
+button::after { content: ""; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }
+button:hover { background: var(--line); }
+button:active { transform: scale(.98); }
+button:disabled, button:disabled:hover { cursor: default; transform: none; color: var(--sub); background: var(--soft); opacity: .6; }
+button.primary, button.primary:hover, button.primary:disabled, button.primary:disabled:hover {
+  background: var(--blue); color: #fff; min-height: 52px; padding: 8px 24px;
+  border-radius: 12px; font-size: 1.25rem; font-weight: 700; opacity: 1;
+}
+button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* 빈 화면 */
+.empty {
+  background: var(--soft); border: 2px dashed transparent; border-radius: 16px; padding: 48px 20px;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+}
+.empty h2 { margin-top: 16px; }
+.empty p { margin-top: 4px; }
+.empty button { margin-top: 24px; }
+body.dragging .empty, body.dragging .files { border-color: var(--text); border-style: dashed; }
+
+/* 오류 안내 */
+#upload-error:empty { position: absolute; }
+.alert { border: 1px solid var(--red); border-radius: 16px; padding: 16px; display: flex; gap: 12px; }
+.alert svg { color: var(--red); }
+.alert > div { min-width: 0; }
+.alert strong { font-weight: 700; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+
+/* 합치기 */
+.work { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.merge .primary { width: 100%; margin-top: 16px; }
+.merge .small { margin-top: 12px; }
+.merge .alert { margin-top: 12px; }
+.progress:not(:empty) { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; }
+.progress svg { color: var(--green); }
+
+/* 파일 목록 */
+.files-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.files-hint { margin-top: 4px; }
+.item {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 8px; padding: 16px 0;
+  border-bottom: 1px solid var(--line); background: var(--bg); cursor: grab;
+  user-select: none; -webkit-user-select: none;
+}
+.item:last-child { border-bottom: 0; padding-bottom: 0; }
+.item.ghost { background: var(--soft); border-radius: 8px; }
+.info { padding-top: 8px; }
+.name { font-weight: 600; }
+.state { margin-top: 4px; }
+.failed { display: flex; align-items: flex-start; gap: 8px; }
+.failed svg { color: var(--red); }
+.failed strong { font-weight: 700; }
+.icon-button { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; background: transparent; }
+.handle { cursor: grab; touch-action: none; color: var(--sub); }
+
+@media (min-width: 800px) {
+  .page { padding-top: 64px; }
+  .work { grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
+  .merge { position: sticky; top: 24px; }
+  .empty { padding: 80px 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  button:active { transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="head">
+    <h1>PDF 합치기</h1>
+    <p>파일은 내 브라우저 밖으로 나가지 않아요</p>
+  </header>
+
+  <main class="main">
+    <input id="picker" type="file" accept=".pdf,application/pdf" multiple hidden>
+
+    <section id="empty" class="empty" aria-labelledby="empty-title">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11.5v6M9 14.5h6"/></svg>
+      <h2 id="empty-title">합칠 PDF를 올려 주세요</h2>
+      <p>파일을 여기로 끌어다 놓아도 돼요</p>
+      <button id="pick" class="primary" type="button">PDF 고르기</button>
+    </section>
+
+    <div id="upload-error" aria-live="assertive"></div>
+
+    <div id="work" class="work" hidden>
+      <section id="files" class="card files" aria-labelledby="files-title">
+        <div class="files-head">
+          <h2 id="files-title">올린 파일</h2>
+          <button id="more" type="button">PDF 더 올리기</button>
+        </div>
+        <p class="small files-hint">파일을 끌어서 순서를 바꿀 수 있어요.</p>
+        <ul id="list"></ul>
+      </section>
+
+      <section class="card merge" aria-labelledby="merge-title">
+        <h2 id="merge-title">하나로 합칠까요?</h2>
+        <p id="summary"></p>
+        <p id="skipped"></p>
+        <button id="merge" class="primary" type="button">합치기</button>
+        <div id="merge-error" aria-live="assertive"></div>
+        <p id="progress" class="progress" role="status"></p>
+        <p class="small">목록에 있는 순서대로 합쳐요.</p>
+      </section>
+    </div>
+    <p id="announce" class="sr" role="status"></p>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var OUTPUT = '합친문서.pdf';
+  var ICON = {
+    check: '<path d="m5 12 5 5 9-10"/>',
+    warn: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/>',
+    close: '<path d="M6 6l12 12M18 6 6 18"/>',
+    grip: '<path d="M5 8h14M5 12h14M5 16h14"/>'
+  };
+  var REASON = {
+    locked: ['암호가 걸려 있어요.', '암호를 푼 파일로 바꿔 주세요.'],
+    broken: ['파일이 망가졌어요.', '원래 파일을 다시 받아서 바꿔 주세요.']
+  };
+  var files = [];
+  var busy = false;
+  var depth = 0;
+  var replacing = null;
+  var sortable = null;
+
+  function icon(name, size) {
+    var t = document.createElement('template');
+    t.innerHTML = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON[name] + '</svg>';
+    return t.content.firstChild;
+  }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    return node;
+  }
+  function button(text, onClick) {
+    var b = el('button', '', text);
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
+  }
+  function sizeText(bytes) {
+    return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(bytes / 1024)) + 'KB';
+  }
+  /* 오류 상자: 무슨 일인지, 왜인지, 어떻게 하면 되는지 */
+  function showAlert(box, title, lines, buttons) {
+    var alertBox = el('div', 'alert');
+    var body = el('div');
+    body.append(el('strong', '', title));
+    lines.forEach(function (line) { body.append(el('p', '', line)); });
+    var row = el('div', 'row');
+    row.append.apply(row, buttons);
+    body.append(row);
+    alertBox.append(icon('warn', 24), body);
+    box.replaceChildren(alertBox);
+  }
+  function clearMessages() {
+    $('merge-error').replaceChildren();
+    $('progress').textContent = '';
+  }
+
+  /* 올리기 */
+  function ready() {
+    if (window.PDFLib) return true;
+    showAlert($('upload-error'), '아직 PDF를 합칠 수 없어요',
+      ['필요한 도구를 인터넷에서 불러오지 못했어요.', '인터넷 연결을 확인하고 다시 불러와 주세요.'],
+      [button('다시 불러오기', function () { location.reload(); })]);
+    return false;
+  }
+  async function readPdf(f) {
+    try {
+      var doc = await PDFLib.PDFDocument.load(await f.file.arrayBuffer(), { updateMetadata: false });
+      var count = doc.getPageCount();
+      /* 적힌 쪽수보다 실제로 읽은 쪽이 적으면 일부가 사라진 파일 */
+      if (!count || doc.catalog.Pages().Count().asNumber() > count) throw new Error('missing pages');
+      f.doc = doc;
+      f.pages = count;
+      f.state = 'ready';
+    } catch (e) {
+      f.reason = /encrypted/i.test(String(e && e.message)) ? 'locked' : 'broken';
+      f.state = 'bad';
+    }
+  }
+  async function addFiles(list, target) {
+    if (busy) return;
+    $('upload-error').replaceChildren();
+    if (!ready()) return;
+    var isPdf = function (file) { return file.type === 'application/pdf' || /\.pdf$/i.test(file.name); };
+    var others = list.filter(function (file) { return !isPdf(file); });
+    var added = list.filter(isPdf).map(function (file) { return { file: file, state: 'read' }; });
+    var at = files.indexOf(target);
+    if (added.length && at >= 0) {
+      target.node.remove();
+      files.splice.apply(files, [at, 1].concat(added));
+    } else {
+      files = files.concat(added);
+    }
+    if (added.length) clearMessages();
+    render();
+    if (others.length) showUploadError(others);
+    for (var f of added) {
+      await readPdf(f);
+      if (files.indexOf(f) >= 0) render();
+    }
+  }
+  function showUploadError(list) {
+    var names = list[0].name + (list.length > 1 ? ' 외 ' + (list.length - 1) + '개' : '');
+    showAlert($('upload-error'), 'PDF 파일만 올릴 수 있어요',
+      [names + ' 파일은 PDF가 아니라서 올리지 못했어요.', '다른 파일을 골라 주세요.'],
+      [button('다른 파일 고르기', function () { openPicker(null); }), button('닫기', function () {
+        $('upload-error').replaceChildren();
+        (files.length ? $('more') : $('pick')).focus();
+      })]);
+  }
+  function openPicker(target) {
+    replacing = target;
+    $('picker').click();
+  }
+  $('pick').addEventListener('click', function () { openPicker(null); });
+  $('more').addEventListener('click', function () { openPicker(null); });
+  $('picker').addEventListener('change', function () {
+    var list = Array.from(this.files);
+    this.value = '';
+    if (list.length) addFiles(list, replacing);
+  });
+  function hasFiles(e) { return e.dataTransfer && Array.from(e.dataTransfer.types).indexOf('Files') >= 0; }
+  addEventListener('dragenter', function (e) { if (hasFiles(e)) { depth++; document.body.classList.add('dragging'); } });
+  addEventListener('dragleave', function (e) { if (hasFiles(e) && --depth <= 0) { depth = 0; document.body.classList.remove('dragging'); } });
+  addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
+  addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    document.body.classList.remove('dragging');
+    addFiles(Array.from(e.dataTransfer.files), null);
+  });
+
+  /* 순서 바꾸기와 빼기 */
+  function moved(f) {
+    clearMessages();
+    render();
+    $('announce').textContent = f.file.name + ' 파일을 ' + (files.indexOf(f) + 1) + '번째로 옮겼어요';
+  }
+  function move(f, step, focusOn) {
+    var from = files.indexOf(f), to = from + step;
+    if (busy || to < 0 || to >= files.length) return;
+    files.splice(from, 1);
+    files.splice(to, 0, f);
+    moved(f);
+    if (focusOn.disabled) focusOn = focusOn === f.up ? f.down : f.up;
+    focusOn.focus();
+  }
+  function remove(f) {
+    var at = files.indexOf(f);
+    files.splice(at, 1);
+    f.node.remove();
+    clearMessages();
+    render();
+    $('announce').textContent = f.file.name + ' 파일을 뺐어요';
+    var next = files[Math.min(at, files.length - 1)];
+    (next ? next.removeButton : $('pick')).focus();
+  }
+  if (window.Sortable) {
+    sortable = Sortable.create($('list'), {
+      draggable: '.item',
+      filter: '.row button, .remove',
+      preventOnFilter: false,
+      forceFallback: true,
+      fallbackTolerance: 4,
+      delay: 160,
+      delayOnTouchOnly: true,
+      touchStartThreshold: 4,
+      animation: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 120,
+      ghostClass: 'ghost',
+      onEnd: function (e) {
+        if (e.oldDraggableIndex === e.newDraggableIndex) return;
+        var order = Array.from($('list').children);
+        files.sort(function (a, b) { return order.indexOf(a.node) - order.indexOf(b.node); });
+        moved(files[e.newDraggableIndex]);
+      }
+    });
+  }
+
+  /* 합치기 */
+  function goodFiles() { return files.filter(function (f) { return f.state === 'ready'; }); }
+  function setBusy(on) {
+    busy = on;
+    $('merge').disabled = on;
+    $('merge').textContent = on ? '합치는 중' : '합치기';
+    $('files').inert = on;
+    if (sortable) sortable.option('disabled', on);
+  }
+  function download(bytes) {
+    var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = OUTPUT;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+  function showMergeError(title, lines, buttons) {
+    showAlert($('merge-error'), title, lines, buttons);
+  }
+  $('merge').addEventListener('click', async function () {
+    if (busy) return;
+    clearMessages();
+    if (files.some(function (f) { return f.state === 'read'; })) {
+      $('progress').textContent = '아직 쪽수를 세고 있어요. 잠시 뒤에 다시 눌러 주세요.';
+      return;
+    }
+    var list = goodFiles();
+    if (list.length < 2) {
+      showMergeError('파일이 더 필요해요',
+        ['합치려면 열 수 있는 파일이 두 개 있어야 해요.', 'PDF를 더 올려 주세요.'],
+        [button('다른 PDF 올리기', function () { openPicker(null); })]);
+      return;
+    }
+    setBusy(true);
+    var current = null;
+    try {
+      var out = await PDFLib.PDFDocument.create();
+      for (var i = 0; i < list.length; i++) {
+        current = list[i];
+        $('progress').textContent = list.length + '개 중 ' + (i + 1) + '번째 파일을 합치고 있어요';
+        await new Promise(function (r) { setTimeout(r); });
+        var pages = await out.copyPages(current.doc, current.doc.getPageIndices());
+        pages.forEach(function (page) { out.addPage(page); });
+      }
+      current = null;
+      var total = out.getPageCount();
+      download(await out.save());
+      $('progress').replaceChildren(icon('check', 24), el('span', '', '모두 ' + total + '쪽으로 합쳤어요. 파일 이름은 ' + OUTPUT + '예요.'));
+    } catch (e) {
+      $('progress').textContent = '';
+      var close = button('닫기', function () { clearMessages(); $('merge').focus(); });
+      if (current) {
+        current.state = 'bad';
+        current.reason = 'broken';
+        render();
+        showMergeError('파일을 합치지 못했어요', [current.file.name + ' 파일이 망가져 있어요.', '합치기를 다시 누르면 그 파일은 빼고 합쳐요.'], [close]);
+      } else {
+        showMergeError('파일을 합치지 못했어요', ['파일이 너무 커서 만들 수 없었어요.', '파일을 몇 개 빼고 다시 합쳐 주세요.'], [close]);
+      }
+    }
+    setBusy(false);
+  });
+
+  /* 화면 그리기 */
+  function iconButton(name, label, className, onClick) {
+    var b = button('', onClick);
+    b.className = 'icon-button ' + className;
+    b.setAttribute('aria-label', label);
+    b.append(icon(name, 20));
+    return b;
+  }
+  function buildItem(f) {
+    var li = el('li', 'item');
+    var handle = iconButton('grip', f.file.name + ' 순서 바꾸기. 위아래 화살표 키로도 옮길 수 있어요', 'handle', function () {});
+    handle.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      move(f, e.key === 'ArrowUp' ? -1 : 1, handle);
+    });
+    var info = el('div', 'info');
+    f.title = el('p', 'name');
+    f.title.title = f.file.name;
+    f.detail = el('div', 'state');
+    f.detail.setAttribute('aria-live', 'polite');
+    f.detail.append(el('p', 'small', '쪽수를 세고 있어요'));
+    f.drawn = 'read';
+    var row = el('div', 'row');
+    f.up = button('위로', function () { move(f, -1, f.up); });
+    f.up.setAttribute('aria-label', f.file.name + ' 위로');
+    f.down = button('아래로', function () { move(f, 1, f.down); });
+    f.down.setAttribute('aria-label', f.file.name + ' 아래로');
+    row.append(f.up, f.down);
+    info.append(f.title, f.detail, row);
+    f.removeButton = iconButton('close', f.file.name + ' 빼기', 'remove', function () { remove(f); });
+    li.append(handle, info, f.removeButton);
+    f.node = li;
+  }
+  function drawDetail(f) {
+    if (f.state === 'ready') {
+      f.detail.replaceChildren(el('p', '', f.pages + '쪽'), el('p', 'small', sizeText(f.file.size)));
+      return;
+    }
+    var box = el('div', 'failed');
+    var text = el('div');
+    text.append(el('strong', '', '이 파일은 열 수 없어요'));
+    REASON[f.reason].forEach(function (line) { text.append(el('p', '', line)); });
+    box.append(icon('warn', 24), text);
+    var row = el('div', 'row');
+    row.append(button('다른 파일로 바꾸기', function () { openPicker(f); }));
+    f.detail.replaceChildren(box, row);
+  }
+  function render() {
+    $('empty').hidden = files.length > 0;
+    $('work').hidden = files.length === 0;
+    $('files-title').textContent = '올린 파일 ' + files.length + '개';
+    var list = $('list');
+    files.forEach(function (f, i) {
+      if (!f.node) buildItem(f);
+      if (list.children[i] !== f.node) list.insertBefore(f.node, list.children[i] || null);
+      if (f.drawn !== f.state) { drawDetail(f); f.drawn = f.state; }
+      f.title.textContent = (i + 1) + '. ' + f.file.name;
+      f.up.disabled = i === 0;
+      f.down.disabled = i === files.length - 1;
+    });
+    var good = goodFiles();
+    var bad = files.filter(function (f) { return f.state === 'bad'; }).length;
+    var pages = good.reduce(function (n, f) { return n + f.pages; }, 0);
+    $('summary').textContent = '합칠 수 있는 파일은 ' + good.length + '개, 모두 ' + pages + '쪽이에요.';
+    $('skipped').textContent = bad ? '열 수 없는 파일 ' + bad + '개는 빼고 합쳐요.' : '';
+  }
+  ready();
+})();
+</script>
+</body>
+</html>
